@@ -4,20 +4,17 @@ import android.annotation.SuppressLint;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.util.Log;
 
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 import com.google.android.things.pio.PeripheralManagerService;
 
 import java.io.IOException;
+import java.util.Timer;
+import java.util.TimerTask;
 
 // TODO Note: Assumptions: 12bit mode, measurements in Celcius.
 // TODO: Good sensor docs for MMA7660FC
-// TODO: Return the last value if called in under a second
-// TODO: Avoid blocking the thread
-//       Cap12xx.java is a good example of how to delay, and trigger on interrupt.
-//       I should be using a callback to return results.
 @SuppressLint("DefaultLocale")
 public class Sht1x implements AutoCloseable {
     private static final String TAG = Sht1x.class.getSimpleName();
@@ -29,7 +26,7 @@ public class Sht1x implements AutoCloseable {
     private static final int SHT1X_SOFT_RESET = 0b00011110;
 
     // Wait up to 1000ms for data from a measurement command
-    private static final long SHT1X_MEASUREMENT_TIMEOUT = 1000;
+    private static final int SHT1X_MEASUREMENT_TIMEOUT = 1000;
 
     // Vdd ranges from the data sheet
     private static final float SHT1X_VDD_MIN = 2.4f;
@@ -45,37 +42,42 @@ public class Sht1x implements AutoCloseable {
     private static final float T2 = 0.00008f;
     private static final float D2 = 0.01f;
 
+    // According to the datasheet, the sensor should not be active for
+    // more than 10% of the time to prevent self heating.  Sampling every
+    // 5 seconds gives us lots of room to spare.
+    public static final int SHT1X_MEASUREMENT_INTERVAL = 5000;
+
+    public static final float SHT1X_TEMPERATURE_RESOLUTION = 0.01f;
+    public static final float SHT1X_TEMPERATURE_MAX = 123.8f;
+
+    public static final float SHT1X_HUMIDITY_RESOLUTION = 0.04f;
+    public static final float SHT1X_HUMIDITY_MAX = 100.0f;
+
+    // Power consumption is a bit of a guess, since if the user has registered
+    // both temperature and humidity sensors, the consumption is counted twice.
+    public static final float SHT1X_POWER_CONSUMPTION_UA = 90;
+
     private PeripheralManagerService mPeripheralManager;
     private Gpio mGpioData;
     private Gpio mGpioSck;
 
     private Handler mHandler;
+    private Timer mTimer;
 
-    private int mRawTemperature;
-    private int mRawHumidity;
+    // Is the sensor started (making measurements)?
+    private boolean mStarted;
+
+    private float mTemperature;
+    private float mHumidity;
+
+    // If set, stored exception to throw when user asks for data
+    private IOException mLastException;
 
     // We calculate the D1 constant, since it varies according to supply
     // voltage and can be represented as a simple linear formula.
     private float mD1;  // Gets assigned in the constructor
     private float calculateD1(float vdd) {
         return (-0.267568f * vdd + -38.756757f);
-    }
-
-
-
-    public interface OnMeasurementCallback {
-        /**
-         * Called when a temperature measurement completes
-         *
-         * @param temperature temperature in Celsius
-         * @param humidity relative humidity (RH) as a percentage
-         */
-        void onMeasurement(float temperature, float humidity);
-
-        /**
-         * Called when measurement encounters an error
-         */
-        void onIOException(IOException e);
     }
 
     /**
@@ -118,6 +120,9 @@ public class Sht1x implements AutoCloseable {
         // Get the default handler if handler is not specified
         mHandler = new Handler(handler == null ? Looper.myLooper() : handler.getLooper());
 
+        // Timer for scheduling measurements.
+        mTimer = new Timer();
+
         mPeripheralManager = new PeripheralManagerService();
         try {
             mGpioData = mPeripheralManager.openGpio(gpioData);
@@ -137,11 +142,38 @@ public class Sht1x implements AutoCloseable {
         }
     }
 
+    // Start making sensor measurements
+    public void start() {
+        synchronized (this) {
+            if (mStarted) return;
+            mLastException = new IOException("No data available");
+            mStarted = true;
+            mTimer = new Timer();
+            mTimer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    doMeasurements();
+                }
+            }, 0, SHT1X_MEASUREMENT_INTERVAL);
+        }
+    }
+
+    // Stop making sensor measurements
+    public void stop() {
+        synchronized (this) {
+            if (!mStarted) return;
+            mStarted = false;
+            mTimer.cancel();
+            mTimer = null;
+        }
+    }
+
     /**
      * Release the GPIO pins
      */
     @Override
     public void close() throws IOException {
+        stop();
         if (mGpioData != null) {
             try {
                 mGpioData.close();
@@ -159,22 +191,35 @@ public class Sht1x implements AutoCloseable {
         }
     }
 
-    // Start a measurement of both temperature and humidity
-    // FIXME: better description.  proper docs
-    public void getMeasurement(final OnMeasurementCallback callback) {
-        // TODO: Return stored value if last measurement was less than a second ago.
+    public float readTemperature() throws IOException {
+        if (!mStarted) {
+            throw new IOException("Sensor has not started");
+        } else if (mLastException != null) {
+            throw mLastException;
+        }
+        return mTemperature;
+    }
 
+    public float readHumidity() throws IOException {
+        if (!mStarted) {
+            throw new IOException("Sensor has not started");
+        } else if (mLastException != null) {
+            throw mLastException;
+        }
+        return mHumidity;
+    }
+
+    private  void doMeasurements() {
         final Object timeoutToken = new Object();
 
         final GpioCallback gpioCallback = new GpioCallback() {
             @Override
             public boolean onGpioEdge(Gpio gpio) {
                 mHandler.removeCallbacksAndMessages(timeoutToken);
-                gpio.unregisterGpioCallback(this);
                 mHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        finishTempMeasurement(callback);
+                        finishTempMeasurement();
                     }
                 });
                 return false; // Do not listen for more events
@@ -183,7 +228,7 @@ public class Sht1x implements AutoCloseable {
             @Override
             public void onGpioError(Gpio gpio, int error) {
                 mHandler.removeCallbacksAndMessages(timeoutToken);
-                callback.onIOException(new IOException("GPIO error: " + error));
+                mLastException = new IOException("GPIO error: " + error);
             }
         };
 
@@ -191,7 +236,7 @@ public class Sht1x implements AutoCloseable {
             @Override
             public void run() {
                 mGpioData.unregisterGpioCallback(gpioCallback);
-                callback.onIOException(new IOException("Timeout waiting for measurement."));
+                mLastException = new IOException("Timeout waiting for temperature measurement.");
             }
         };
 
@@ -211,32 +256,35 @@ public class Sht1x implements AutoCloseable {
         } catch (IOException e) {
             mGpioData.unregisterGpioCallback(gpioCallback);
             mHandler.removeCallbacksAndMessages(timeoutToken);
-            callback.onIOException(e);
-            return;
+            mLastException = e;
         }
     }
 
-    // Collect the temp data, then send to command to collect the humidity data
-    private void finishTempMeasurement(final OnMeasurementCallback callback) {
+    // Collect the temperature measurement, and invoke the callback
+    private void finishTempMeasurement() {
+        int rawTemperature;
         try {
-            mRawTemperature = readData();
+            rawTemperature = readData();
             skipCrc();
         } catch (IOException e) {
-            callback.onIOException(e);
+            mLastException = e;
             return;
         }
+        mTemperature = (mD1 + D2 * rawTemperature);
+        getHumidityMeasurement();
+    }
 
+    private void getHumidityMeasurement() {
         final Object timeoutToken = new Object();
 
         final GpioCallback gpioCallback = new GpioCallback() {
             @Override
             public boolean onGpioEdge(Gpio gpio) {
                 mHandler.removeCallbacksAndMessages(timeoutToken);
-                gpio.unregisterGpioCallback(this);
                 mHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        finishRhMeasurement(callback);
+                        finishMeasurements();
                     }
                 });
                 return false; // Do not listen for more events
@@ -245,7 +293,7 @@ public class Sht1x implements AutoCloseable {
             @Override
             public void onGpioError(Gpio gpio, int error) {
                 mHandler.removeCallbacksAndMessages(timeoutToken);
-                callback.onIOException(new IOException("GPIO error: " + error));
+                mLastException = new IOException("GPIO error: " + error);
             }
         };
 
@@ -253,13 +301,13 @@ public class Sht1x implements AutoCloseable {
             @Override
             public void run() {
                 mGpioData.unregisterGpioCallback(gpioCallback);
-                callback.onIOException(new IOException("Timeout waiting for measurement."));
+                mLastException = new IOException("Timeout waiting for humidity measurement.");
             }
         };
 
         try {
             // Send the measurement command
-            sendCommand(SHT1X_CMD_MEASURE_TEMPERATURE);
+            sendCommand(SHT1X_CMD_MEASURE_HUMIDITY);
 
             mGpioData.setDirection(Gpio.DIRECTION_IN);
             mGpioData.setEdgeTriggerType(Gpio.EDGE_FALLING);
@@ -273,85 +321,38 @@ public class Sht1x implements AutoCloseable {
         } catch (IOException e) {
             mGpioData.unregisterGpioCallback(gpioCallback);
             mHandler.removeCallbacksAndMessages(timeoutToken);
-            callback.onIOException(e);
-            return;
+            mLastException = e;
         }
     }
 
-    void finishRhMeasurement(final OnMeasurementCallback callback) {
+    private void finishMeasurements() {
+        int rawHumidity;
         try {
-            mRawHumidity = readData();
+            rawHumidity = readData();
             skipCrc();
         } catch (IOException e) {
-            callback.onIOException(e);
+            mLastException = e;
             return;
         }
-        returnMeasurement(callback);
-    }
-
-    void returnMeasurement(final OnMeasurementCallback callback) {
-        float temperature = (mD1 + D2 * mRawTemperature);
-        float rhLinear = C1 + C2 * mRawHumidity + C3 * mRawHumidity * mRawHumidity;
-        float rhTrue = (temperature - 25) * (T1 + T2 * mRawHumidity) + rhLinear;
-        if (rhTrue > 100) {
-            rhTrue = 100;
-        } else if (rhTrue < 0) {
-            rhTrue = 0;
-        }
-        callback.onMeasurement(temperature, rhTrue);
-    }
-
-    /**
-     * Read the current temperature.
-     *
-     * @return the current temperature in degrees Celsius
-     */
-    private float readTemperature() throws IOException {
-        int rawTemp = readRawTemperature();
-        return (mD1 + D2 * rawTemp);
-    }
-
-    /**
-     * Read the current humidity.
-     *
-     * @return the current relative humidity in RH percentage (100f means totally saturated air)
-     */
-    private float readHumidity() throws IOException {
-        int rawHumidity = readRawHumidity();
-        float temperature = readTemperature();
-
         float rhLinear = C1 + C2 * rawHumidity + C3 * rawHumidity * rawHumidity;
-        float rhTrue = (temperature - 25) * (T1 + T2 * rawHumidity) + rhLinear;
-        if (rhTrue > 100) {
-            rhTrue = 100;
-        } else if (rhTrue < 0) {
-            rhTrue = 0;
+        float humidity = (mTemperature - 25) * (T1 + T2 * rawHumidity) + rhLinear;
+        if (humidity > 100) {
+            humidity = 100;
+        } else if (humidity < 0) {
+            humidity = 0;
         }
-        return rhTrue;
-    }
-
-    private int readRawTemperature() throws IOException {
-        sendCommand(SHT1X_CMD_MEASURE_TEMPERATURE);
-        waitForResult();
-        int rawTemperature = readData();
-        skipCrc();
-        return rawTemperature;
-    }
-
-    private int readRawHumidity() throws IOException {
-        sendCommand(SHT1X_CMD_MEASURE_HUMIDITY);
-        waitForResult();
-        int rawHumidity = readData();
-        skipCrc();
-        return rawHumidity;
+        mHumidity = humidity;
+        // Clear exception (if present)
+        mLastException = null;
     }
 
     private void sendCommand(int command) throws IOException {
+        // Make sure there is no edge trigger set.  See:
+        //     https://issuetracker.google.com/issues/66972799
+        mGpioData.setEdgeTriggerType(Gpio.EDGE_NONE);
+
         mGpioData.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         mGpioSck.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
-
-        mGpioData.setValue(true); // needed?
-        mGpioSck.setValue(true); // needed?
         waitSckCycle();
 
         // Send "Transmission start sequence"
@@ -404,24 +405,11 @@ public class Sht1x implements AutoCloseable {
         } while (end >= current);
     }
 
-    // After receiving a measurement command, the DATA line
-    // should be initially high, then pulled low to indicate
-    // the data is ready.  The measurement time should take about
-    // 320ms (for 14bit values)
-    private void waitForResult() {
-        // Something that gets called when data goes low,
-        // or a timeout (1s) is reached.
-        // FIXME: Implement me properly!
-        for (int i=0; i < 100; i++) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                // DO NOTHING
-            }
-        }
-    }
-
     private int readData() throws IOException {
+        // Make sure there is no edge trigger set.  See:
+        //     https://issuetracker.google.com/issues/66972799
+        mGpioData.setEdgeTriggerType(Gpio.EDGE_NONE);
+
         mGpioData.setDirection(Gpio.DIRECTION_IN);
         mGpioSck.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
 
@@ -459,6 +447,10 @@ public class Sht1x implements AutoCloseable {
     }
 
     private void skipCrc() throws IOException {
+        // Make sure there is no edge trigger set.  See:
+        //     https://issuetracker.google.com/issues/66972799
+        mGpioData.setEdgeTriggerType(Gpio.EDGE_NONE);
+
         mGpioData.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         mGpioSck.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         waitSckCycle();
@@ -469,6 +461,10 @@ public class Sht1x implements AutoCloseable {
     // Reset device state.  Can be useful if the device has a pending result that
     // was never retrieved, or has interpreted some line noise as an SCK pulse.
     private void connectionReset() throws IOException {
+        // Make sure there is no edge trigger set.  See:
+        //     https://issuetracker.google.com/issues/66972799
+        mGpioData.setEdgeTriggerType(Gpio.EDGE_NONE);
+
         mGpioData.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         mGpioSck.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         for (int i=0; i < 10; i++) {
