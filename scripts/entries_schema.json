@@ -1,0 +1,14 @@
+[
+    { "mode": "REQUIRED", "name": "deviceId", "type": "STRING" },
+    { "mode": "REQUIRED", "name": "time", "type": "TIMESTAMP" },
+    { "mode": "REQUIRED", "name": "latitude", "type": "FLOAT" },
+    { "mode": "REQUIRED", "name": "longitude", "type": "FLOAT" },
+    { "mode": "REQUIRED", "name": "accuracy", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "altitude", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "verticalAccuracy", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "temperature", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "humidity", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "pressure", "type": "FLOAT" },
+    { "mode": "NULLABLE", "name": "pm25", "type": "INTEGER" },
+    { "mode": "NULLABLE", "name": "pm10", "type": "INTEGER" }
+]

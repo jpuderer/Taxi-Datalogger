@@ -8,7 +8,7 @@ android {
     compileSdkVersion 26
     buildToolsVersion '26.0.2'
     defaultConfig {
-        applicationId "net.jpuderer.android.things.storagedatalogger"
+        applicationId "net.jpuderer.android.things.taxidatalogger"
         minSdkVersion 26
         targetSdkVersion 26
         versionCode 1
@@ -29,5 +29,28 @@ dependencies {
     androidTestImplementation 'com.android.support.test:runner:1.0.1'
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.1'
     compileOnly 'com.google.android.things:androidthings:+'
-    implementation"org.jetbrains.kotlin:kotlin-stdlib-jre7:$kotlin_version"
+
+    compile 'com.google.android.things.contrib:driver-gps:0.4'
+    compile 'com.google.android.things.contrib:driver-bmx280:0.4'
+
+    compile 'org.msgpack:msgpack-core:0.8.13'
+    compile 'com.android.support:support-annotations:25.4.0'
+
+    // for MQTT:
+    compile('org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.1.0', {
+        exclude group: 'com.google.android', module: 'support-v4'
+    })
+    compile('org.eclipse.paho:org.eclipse.paho.android.service:1.0.2', {
+        exclude group: 'com.google.android', module: 'support-v4'
+    })
+    compile 'io.jsonwebtoken:jjwt:0.7.0'
+
+    // Helper libraries for MQTT support:
+    compile 'joda-time:joda-time:2.9.7'
+    compile 'commons-io:commons-io:2.5'
+    compile 'org.jetbrains:annotations-java5:15.0'
+    compile "org.jetbrains.kotlin:kotlin-stdlib-jre7:$kotlin_version"
+}
+repositories {
+    mavenCentral()
 }

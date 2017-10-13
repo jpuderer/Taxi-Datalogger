@@ -1,4 +1,4 @@
-package net.jpuderer.android.things.storagedatalogger
+package net.jpuderer.android.things.taxidatalogger
 
 import org.junit.Test
 

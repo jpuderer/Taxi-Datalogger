@@ -16,8 +16,8 @@ import java.util.TimerTask;
 // TODO Note: Assumptions: 12bit mode, measurements in Celcius.
 // TODO: Good sensor docs for MMA7660FC
 @SuppressLint("DefaultLocale")
-public class Sht1x implements AutoCloseable {
-    private static final String TAG = Sht1x.class.getSimpleName();
+public class Sht1xSensor implements AutoCloseable {
+    private static final String TAG = Sht1xSensor.class.getSimpleName();
 
     private static final int SHT1X_CMD_MEASURE_TEMPERATURE = 0b00000011;
     private static final int SHT1X_CMD_MEASURE_HUMIDITY = 0b00000101;
@@ -86,7 +86,7 @@ public class Sht1x implements AutoCloseable {
      * @param gpioSck Pin connected to SCK on the sensor.
      * @throws IOException Sensor error
      */
-    public Sht1x(String gpioData, String gpioSck) throws IOException {
+    public Sht1xSensor(String gpioData, String gpioSck) throws IOException {
         this(gpioData, gpioSck, SHT1X_VDD_TYPICAL, null);
     }
 
@@ -97,7 +97,7 @@ public class Sht1x implements AutoCloseable {
      * @param vdd Supply voltage (Vdd) used to power the sensor.
      * @throws IOException Sensor error
      */
-    public Sht1x(String gpioData, String gpioSck, float vdd) throws IOException {
+    public Sht1xSensor(String gpioData, String gpioSck, float vdd) throws IOException {
         this(gpioData, gpioSck, SHT1X_VDD_TYPICAL, null);
     }
 
@@ -109,7 +109,7 @@ public class Sht1x implements AutoCloseable {
      * @param handler
      * @throws IOException Sensor error
      */
-    public Sht1x(String gpioData, String gpioSck, float vdd, Handler handler) throws IOException {
+    public Sht1xSensor(String gpioData, String gpioSck, float vdd, Handler handler) throws IOException {
         if ((vdd < SHT1X_VDD_MIN) || (vdd > SHT1X_VDD_MAX)) {
             final String msg = String.format("Vdd must be between %.1f and %.1f",
                     SHT1X_VDD_MIN, SHT1X_VDD_MAX);

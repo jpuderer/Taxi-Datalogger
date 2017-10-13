@@ -18,10 +18,10 @@ public class Sht1xSensorDriver implements AutoCloseable {
     private static final String DRIVER_VENDOR = "Sensirion";
     private static final String DRIVER_NAME = "SHT10/11/15";
     // Our driver doesn't make measurement more than once every 5 seconds.
-    private static final int DRIVER_MIN_DELAY_US = Sht1x.SHT1X_MEASUREMENT_INTERVAL;
+    private static final int DRIVER_MIN_DELAY_US = Sht1xSensor.SHT1X_MEASUREMENT_INTERVAL;
     // The maximum value seems pretty arbitrary, so we just say double the minimum
-    private static final int DRIVER_MAX_DELAY_US = Sht1x.SHT1X_MEASUREMENT_INTERVAL * 2;
-    private Sht1x mDevice;
+    private static final int DRIVER_MAX_DELAY_US = Sht1xSensor.SHT1X_MEASUREMENT_INTERVAL * 2;
+    private Sht1xSensor mDevice;
 
     private TemperatureUserDriver mTemperatureUserDriver;
     private HumidityUserDriver mHumidityUserDriver;
@@ -37,7 +37,7 @@ public class Sht1xSensorDriver implements AutoCloseable {
      * @see #registerHumiditySensor()
      */
     public Sht1xSensorDriver(String gpioData, String gpioSck) throws IOException {
-        mDevice = new Sht1x(gpioData, gpioSck);
+        mDevice = new Sht1xSensor(gpioData, gpioSck);
     }
 
     /**
@@ -52,7 +52,7 @@ public class Sht1xSensorDriver implements AutoCloseable {
      * @see #registerHumiditySensor()
      */
     public Sht1xSensorDriver(String gpioData, String gpioSck, float vdd) throws IOException {
-        mDevice = new Sht1x(gpioData, gpioSck, vdd);
+        mDevice = new Sht1xSensor(gpioData, gpioSck, vdd);
     }
 
     /**
@@ -145,9 +145,9 @@ public class Sht1xSensorDriver implements AutoCloseable {
                         .setName(DRIVER_NAME)
                         .setVendor(DRIVER_VENDOR)
                         .setVersion(DRIVER_VERSION)
-                        .setMaxRange(Sht1x.SHT1X_TEMPERATURE_MAX)
-                        .setResolution(Sht1x.SHT1X_TEMPERATURE_RESOLUTION)
-                        .setPower(Sht1x.SHT1X_POWER_CONSUMPTION_UA)
+                        .setMaxRange(Sht1xSensor.SHT1X_TEMPERATURE_MAX)
+                        .setResolution(Sht1xSensor.SHT1X_TEMPERATURE_RESOLUTION)
+                        .setPower(Sht1xSensor.SHT1X_POWER_CONSUMPTION_UA)
                         .setMinDelay(DRIVER_MIN_DELAY_US)
                         .setRequiredPermission(DRIVER_REQUIRED_PERMISSION)
                         .setMaxDelay(DRIVER_MAX_DELAY_US)
@@ -188,9 +188,9 @@ public class Sht1xSensorDriver implements AutoCloseable {
                         .setName(DRIVER_NAME)
                         .setVendor(DRIVER_VENDOR)
                         .setVersion(DRIVER_VERSION)
-                        .setMaxRange(Sht1x.SHT1X_HUMIDITY_MAX)
-                        .setResolution(Sht1x.SHT1X_HUMIDITY_RESOLUTION)
-                        .setPower(Sht1x.SHT1X_POWER_CONSUMPTION_UA)
+                        .setMaxRange(Sht1xSensor.SHT1X_HUMIDITY_MAX)
+                        .setResolution(Sht1xSensor.SHT1X_HUMIDITY_RESOLUTION)
+                        .setPower(Sht1xSensor.SHT1X_POWER_CONSUMPTION_UA)
                         .setMinDelay(DRIVER_MIN_DELAY_US)
                         .setRequiredPermission(DRIVER_REQUIRED_PERMISSION)
                         .setMaxDelay(DRIVER_MAX_DELAY_US)

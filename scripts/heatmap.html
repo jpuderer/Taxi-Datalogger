@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+<meta charset="UTF-8">
+<title>BigQuery and Maps API</title>
+
+<!-- Google Client API for Javascript-->
+<script src="https://apis.google.com/js/client.js"></script>
+<!-- Maps API -->
+<script src="https://maps.googleapis.com/maps/api/js?libraries=visualization,drawing&key=AIzaSyD2LJeC9O4osImfcZAGut_lMnUnXvMUHp8">
+</script>
+
+<script type="text/javascript">
+///////////////////////////////////////
+// USER CONFIGURATION - PLEASE CHANGE!
+///////////////////////////////////////
+
+var clientId = '569077745239-r8bnh2o9mjv9jndtenhfh08fdjisuv3h.apps.googleusercontent.com';
+var scopes = 'https://www.googleapis.com/auth/bigquery';
+var projectId = 'taxi-datalogger';
+var datasetId = 'taxi_sensor_data';
+var table_name = 'log_entries';
+// Center the map in Lima.  Change to wherever you like.
+var centerLatLng = new google.maps.LatLng(-12.1111, -77.0316);
+var zoomLevel = 15;
+
+///////////////////////////////////////
+// END OF USER CONFIGURATION 
+///////////////////////////////////////
+
+var jobCheckTimer = null;
+var heatmap = null;
+var map, drawingManager;
+var currentShape = null;
+var recordLimit = 10000; //just to stop loading too much data into the browser by accident
+
+// Start everything when page is ready.
+// Kicked off when the Maps API has loaded.
+function initialize() {
+  authorise();
+}
+
+// BigQuery authorization. Table being queried must be shared with logged in user.
+
+// Check if the user is authorised.
+function authorise(event) {
+  gapi.auth.authorize({client_id: clientId, scope: scopes, immediate: false}, handleAuthResult);
+  return false;
+}
+
+// If authorized, load BigQuery API.
+function handleAuthResult(authResult) {
+  if (authResult && !authResult.error) {
+    loadApi();
+  } else {
+    console.log("Sorry, you are not authorised to access BigQuery.")
+  }
+}
+
+// Load BigQuery client API.
+function loadApi(){
+  gapi.client.load('bigquery', 'v2').then(
+    function() {
+      console.log('BigQuery API loaded.');
+      createMap();
+    }
+  );
+}
+
+//create a map object with default zoom and center
+function createMap(){
+  var element = document.getElementById("map-canvas");
+    map = new google.maps.Map(element, {
+      zoom: zoomLevel,
+      center: centerLatLng,
+      mapTypeId: google.maps.MapTypeId.ROADMAP
+    });
+  setUpDrawingTools();
+}
+
+// Create the drawing tools.
+function setUpDrawingTools(){
+  // Initialize the drawing manager.
+  drawingManager = new google.maps.drawing.DrawingManager({
+      drawingMode: null,
+      drawingControl: true,
+      drawingControlOptions: {
+          position: google.maps.ControlPosition.TOP_LEFT,
+          drawingModes: [
+              google.maps.drawing.OverlayType.RECTANGLE
+          ]
+      },
+      rectangleOptions: {
+          fillOpacity: 0
+      }
+  });
+  drawingManager.setMap(map);
+  
+  // Handle the event triggered when a shape is drawn.
+  google.maps.event.addListener(drawingManager, 'rectanglecomplete', function (rectangle) {
+    currentShape = rectangle;
+    rectangleQuery(rectangle.getBounds());
+  });
+}
+
+
+// Send a query for all data within a rectangular area.
+function rectangleQuery(latLngBounds){
+  var queryString = rectangleSQL(latLngBounds.getNorthEast(), latLngBounds.getSouthWest());
+  sendQuery(queryString);
+}
+
+// Send a query to BigQuery via the REST API.
+function sendQuery(queryString){
+  var request = gapi.client.bigquery.jobs.query({
+      "query": queryString,
+      "timeoutMs": 30000,
+      "datasetId": datasetId,
+      "projectId": projectId
+  });
+  request.execute(function(response) {
+      console.log(response);
+      checkJobStatus(response.jobReference.jobId);
+  });
+}
+
+// Construct the SQL for a rectangle query.
+function rectangleSQL(ne, sw){
+  var queryString = "SELECT Latitude, Longitude "
+  queryString +=  "FROM [" + projectId + ":" + datasetId + "." + table_name + "]"
+  queryString += " WHERE Latitude > " + sw.lat();
+  queryString += " AND Latitude < " + ne.lat();
+  queryString += " AND Longitude > " + sw.lng();
+  queryString += " AND Longitude < " + ne.lng();
+  queryString += " LIMIT " + recordLimit;
+  return queryString;
+}
+
+
+// BigQuery utilities
+// Poll a job to check its status.
+function checkJobStatus(jobId){
+  var request = gapi.client.bigquery.jobs.get({
+    "projectId": projectId,
+    "jobId": jobId
+  });
+  request.execute(function(response){
+    if (response.status.errorResult){
+      console.log(response.status.error);
+    } else {
+      if (response.status.state == 'DONE'){
+        //get the results
+        clearTimeout(jobCheckTimer);
+        getQueryResults(jobId);
+      } else {
+        // No error, not finished, check again in a moment.
+        console.log("Job running, waiting 0.5 seconds...");
+        jobCheckTimer = setTimeout(checkJobStatus, 500, [jobId]);
+      }
+    }
+  });
+}
+
+// When a job is complete, get the results.
+function getQueryResults(jobId){
+  var request = gapi.client.bigquery.jobs.getQueryResults({
+    "projectId": projectId,
+    "jobId": jobId
+  });
+  request.execute(function(response){
+    // Draw a heatmap from the list of rows returned.
+    doHeatMap(response.result.rows);
+  })
+}
+
+// Map utilties
+// Display selected rows as a heatmap.
+function doHeatMap (rows){
+  // Remove the user drawing.
+  if (currentShape) {
+    currentShape.setMap(null);
+  }
+  var heatmapData = [];
+  if (heatmap!=null) {
+    heatmap.setMap(null);
+  }
+  if (rows) {
+    for (var i = 0; i < rows.length; i++) {
+        var f = rows[i].f;
+        var coords = { lat: parseFloat(f[0].v), lng: parseFloat(f[1].v) };
+        var latLng = new google.maps.LatLng(coords);
+        heatmapData.push(latLng);
+    }
+    heatmap = new google.maps.visualization.HeatmapLayer({
+        data: heatmapData
+    });
+    heatmap.setMap(map);
+  }
+}
+
+// Run init function when window loaded.
+google.maps.event.addDomListener(window, 'load', initialize);
+</script>
+
+<style type="text/css">
+html, body, #map-canvas {
+  margin: 0; padding: 0; height: 100%;
+}
+</style>
+
+</head>
+<body>
+<!-- HTML element for map -->
+<div id="map-canvas"></div>
+</body>
+</html>

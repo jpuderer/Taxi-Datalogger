@@ -1,0 +1,9 @@
+env:
+# Change to your project ID
+    PROJECT_ID: 'taxi-datalogger'
+# Change to  datasetid
+    DATASET_ID: 'taxi_sensor_data'
+# Change to tableid
+    TABLE_ID: 'log_entries'
+# Change the following to your pull subscription    
+    SUBSCRIPTION: 'projects/taxi-datalogger/subscriptions/storage'
