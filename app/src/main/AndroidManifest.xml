@@ -6,8 +6,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="com.google.android.things.permission.MANAGE_SENSOR_DRIVERS" />
     <uses-permission android:name="com.google.android.things.permission.MANAGE_GPS_DRIVERS" />
 
@@ -17,17 +15,14 @@
         <activity android:name="net.jpuderer.android.things.taxidatalogger.DataLoggerActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.IOT_LAUNCHER" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-        <service android:name="net.jpuderer.android.things.taxidatalogger.ble.BleDataLoggerServer" />
         <service
             android:name="net.jpuderer.android.things.taxidatalogger.cloud.CloudPublisherService"
             android:exported="true">

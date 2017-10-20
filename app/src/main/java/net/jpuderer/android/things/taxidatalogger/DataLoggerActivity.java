@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 James Puderer
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package net.jpuderer.android.things.taxidatalogger;
 
 import android.app.Activity;
@@ -22,8 +38,6 @@ import com.google.android.things.contrib.driver.gps.NmeaGpsDriver;
 import com.google.android.things.pio.PeripheralManagerService;
 
 import net.jpuderer.android.things.driver.hpm.HpmSensorDriver;
-import net.jpuderer.android.things.driver.sht1x.Sht1xSensorDriver;
-import net.jpuderer.android.things.taxidatalogger.ble.BleDataLoggerServer;
 import net.jpuderer.android.things.taxidatalogger.cloud.CloudPublisherService;
 
 import java.io.IOException;
@@ -31,18 +45,24 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-// FIXME: Use a more flexible logging format (JSON)
+// TODO: Use a more flexible logging format (JSON).  I thought I would do some
+// querying on the device, but it turns out not.  I should probably just store
+// encoded JSON, since that makes it easier to add and remove sensors.
 public class DataLoggerActivity extends Activity {
     private static final String TAG = DataLoggerActivity.class.getSimpleName();
 
     private static final HashSet<Integer> SUPPORTED_SENSORS = new HashSet<Integer>();
 
-    // FIXME: Set sample interval back to 60s.  10s for now, so we have more data to debug with.
     private static final int SAMPLE_INTERVAL_MS = 10000;
+
     // GPS fixes are considered valid for 10 seconds.  This should be fine, since we should be
     // receiving constant updates, and 10 seconds can be a long time, since we may be moving
     // quickly.
     private static final long GPS_FIX_VALIDITY_MS = 10000;
+
+    private static final String BMX280_I2C_BUS_NAME = "I2C1";
+    private static final String HPM_SENSOR_UART_NAME = "UART1";
+    private static final String NMEA_GPS_UART_NAME = "USB1-1.4:1.0";
 
     static {
         SUPPORTED_SENSORS.add(Sensor.TYPE_AMBIENT_TEMPERATURE);
@@ -50,9 +70,6 @@ public class DataLoggerActivity extends Activity {
         SUPPORTED_SENSORS.add(Sensor.TYPE_PRESSURE);
         SUPPORTED_SENSORS.add(Sensor.TYPE_DEVICE_PRIVATE_BASE);
     }
-
-    // SHT1x temperature and humidity sensor driver
-    Sht1xSensorDriver mSht1xSensorDriver;
 
     // BMX280 temperature, humidity, and pressure sensor driver
     Bmx280SensorDriver mBmx280SensorDriver;
@@ -151,6 +168,9 @@ public class DataLoggerActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Devices with a display should not go to sleep
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         // Create handler
         mHandler = new Handler();
 
@@ -158,29 +178,17 @@ public class DataLoggerActivity extends Activity {
         mDbHelper = new DatalogDbHelper(this);
         mDb = mDbHelper.getWritableDatabase();
 
-        // Register sensors and start requesting data from them
-        registerSensors();
-
         // Acquire a reference to the system Location Manager
         mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
-        // Register the listener with the Location Manager to receive location updates
-        mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
-                0, 0, mLocationListener);
-        // FIXME: Don't forget to unregister!!!
-
-        // Devices with a display should not go to sleep
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // Register sensors and start requesting data from them
+        registerSensors();
 
         Log.d(TAG, "Starting data collection...");
         startDataCollection();
 
-        Log.d(TAG, "Starting BLE service...");
-        Intent intent = new Intent(this, BleDataLoggerServer.class);
-        startService(intent);
-
         Log.d(TAG, "Start Google Cloud Iot Publisher...");
-        intent = new Intent(this, CloudPublisherService.class);
+        Intent intent = new Intent(this, CloudPublisherService.class);
         startService(intent);
 
         PeripheralManagerService manager = new PeripheralManagerService();
@@ -214,7 +222,7 @@ public class DataLoggerActivity extends Activity {
 
         // Register Temperature, Humidity, and Pressure sensor
         try {
-            mBmx280SensorDriver = new Bmx280SensorDriver("I2C1");
+            mBmx280SensorDriver = new Bmx280SensorDriver(BMX280_I2C_BUS_NAME);
             mBmx280SensorDriver.registerTemperatureSensor();
             mBmx280SensorDriver.registerHumiditySensor();
             mBmx280SensorDriver.registerPressureSensor();
@@ -222,21 +230,25 @@ public class DataLoggerActivity extends Activity {
             Log.e(TAG, "Error registering BMX280 sensor");
         }
 
-        // Register GPS driver
+        // Register HPM particle sensor driver
         try {
-            mGpsDriver = new NmeaGpsDriver(this, "USB1-1.4:1.0",
-                9600, 5);
-            mGpsDriver.register();
+            mHpmDriver = new HpmSensorDriver(HPM_SENSOR_UART_NAME);
+            mHpmDriver.registerParticleSensor();
         } catch (IOException e) {
-            Log.e(TAG, "Error registering GPS driver");
+            Log.e(TAG, "Error registering HPM sensor driver");
         }
 
         // Register GPS driver
         try {
-            mHpmDriver = new HpmSensorDriver("UART1");
-            mHpmDriver.registerParticleSensor();
+            mGpsDriver = new NmeaGpsDriver(this, NMEA_GPS_UART_NAME,
+                9600, 5);
+            mGpsDriver.register();
+
+            // Register the listener with the Location Manager to receive location updates
+            mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
+                    0, 0, mLocationListener);
         } catch (IOException e) {
-            Log.e(TAG, "Error registering HPM sensor driver");
+            Log.e(TAG, "Error registering GPS driver");
         }
     }
 
@@ -268,13 +280,16 @@ public class DataLoggerActivity extends Activity {
                 Log.e(TAG, "Error closing GPS driver");
             }
         }
+        if (mLocationManager != null)
+            mLocationManager.removeUpdates(mLocationListener);
     }
 
     // Regularly (every SAMPLE_INTERVAL_MS) record sensor values to the database
     private void startDataCollection() {
         final Runnable doDataCollection = new Runnable() {
             private boolean toOld(long timestamp) {
-                return (SystemClock.uptimeMillis() - (timestamp / 1000000) > SAMPLE_INTERVAL_MS);
+                final long timestamp_ms = TimeUnit.NANOSECONDS.toMillis(timestamp);
+                return (SystemClock.uptimeMillis() - timestamp_ms > SAMPLE_INTERVAL_MS);
             }
 
             @Override
@@ -320,9 +335,9 @@ public class DataLoggerActivity extends Activity {
                 // way we're using Location Services with GPS as a source:
                 //     https://stackoverflow.com/questions/7017069/gps-time-in-android;
 
-                // TODO: Get PM25 value to log
                 if (hasGpsFix) {
                     long count = DatalogDbHelper.log(mDb,
+                            // Bigtable uses seconds since epoch as a float
                             mSensorData.location.getTime() / 1000d,
                             mSensorData.location.getLatitude(),
                             mSensorData.location.getLongitude(),
