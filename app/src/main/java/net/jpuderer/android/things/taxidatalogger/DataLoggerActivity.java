@@ -35,7 +35,7 @@ import android.view.WindowManager;
 
 import com.google.android.things.contrib.driver.bmx280.Bmx280SensorDriver;
 import com.google.android.things.contrib.driver.gps.NmeaGpsDriver;
-import com.google.android.things.pio.PeripheralManagerService;
+import com.google.android.things.pio.PeripheralManager;
 
 import net.jpuderer.android.things.driver.hpm.HpmSensorDriver;
 import net.jpuderer.android.things.taxidatalogger.cloud.CloudPublisherService;
@@ -191,7 +191,7 @@ public class DataLoggerActivity extends Activity {
         Intent intent = new Intent(this, CloudPublisherService.class);
         startService(intent);
 
-        PeripheralManagerService manager = new PeripheralManagerService();
+        PeripheralManager manager = PeripheralManager.getInstance();
         List<String> deviceList = manager.getUartDeviceList();
         if (deviceList.isEmpty()) {
             Log.i(TAG, "No UART port available on this device.");
