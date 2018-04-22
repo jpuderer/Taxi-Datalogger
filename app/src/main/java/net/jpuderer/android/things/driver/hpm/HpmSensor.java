@@ -20,7 +20,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.util.Log;
 
-import com.google.android.things.pio.PeripheralManagerService;
+import com.google.android.things.pio.PeripheralManager;
 import com.google.android.things.pio.UartDevice;
 import com.google.android.things.pio.UartDeviceCallback;
 
@@ -86,7 +86,7 @@ public class HpmSensor implements AutoCloseable {
         mHandler = handler;
 
         // Open and setup UARTdevice
-        PeripheralManagerService manager = new PeripheralManagerService();
+        PeripheralManager manager = PeripheralManager.getInstance();
         mDevice = manager.openUartDevice(uartName);
         mDevice.setBaudrate(9600);
         mDevice.setDataSize(8);
@@ -110,7 +110,7 @@ public class HpmSensor implements AutoCloseable {
         mLastException = new IOException("No data available");
 
         // Begin listening for interrupt events
-        mDevice.registerUartDeviceCallback(mUartCallback, mHandler);
+        mDevice.registerUartDeviceCallback(mHandler, mUartCallback);
 
         // Turn on autosend (to get regular sensor readings)
         sendCommand(CMD_START_PARTICLE_MEASUREMENT);
